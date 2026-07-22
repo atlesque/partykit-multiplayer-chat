@@ -26,6 +26,17 @@ async function expectNoWebSocketAttempt(page: Page) {
   ).toEqual([])
 }
 
+async function expectPartyKitWebSocketAttempt(page: Page) {
+  await expect.poll(() =>
+    page.evaluate(
+      () =>
+        (window as typeof window & { __webSocketUrls: string[] }).__webSocketUrls.filter(
+          url => new URL(url).pathname.startsWith('/parties/main/'),
+        ).length,
+    ),
+  ).toBeGreaterThan(0)
+}
+
 test('gates a valid direct Room link until a Chosen Name is submitted', async ({ page }) => {
   await countWebSocketAttempts(page)
   await page.goto(`/rooms/${roomId}`)
@@ -37,10 +48,9 @@ test('gates a valid direct Room link until a Chosen Name is submitted', async ({
   await page.getByLabel('Chosen Name').fill('Jordan')
   await page.getByRole('button', { name: 'Enter Room' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Ready to connect' })).toBeVisible()
-  await expect(page.getByText('Joining as Jordan')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Room is live' })).toBeVisible()
   await expect(page.getByText(roomId)).toBeVisible()
-  await expectNoWebSocketAttempt(page)
+  await expectPartyKitWebSocketAttempt(page)
 })
 
 test('explains an invalid gate name without erasing it', async ({ page }) => {
@@ -61,8 +71,7 @@ test('uses a remembered same-tab Chosen Name without showing the gate', async ({
 
   await page.goto(`/rooms/${roomId}`)
 
-  await expect(page.getByRole('heading', { name: 'Ready to connect' })).toBeVisible()
-  await expect(page.getByText('Joining as Riley')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Room is live' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Enter Room' })).toHaveCount(0)
 })
 

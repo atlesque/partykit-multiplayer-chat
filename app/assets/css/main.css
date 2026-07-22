@@ -23,7 +23,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -114,7 +115,8 @@ h1 {
   font-weight: 650;
 }
 
-input {
+input,
+textarea {
   width: 100%;
   border: 1px solid #b9bdb7;
   border-radius: 0.8rem;
@@ -125,13 +127,24 @@ input {
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-input:focus {
+input:focus,
+textarea:focus {
   border-color: #25684f;
   box-shadow: 0 0 0 0.22rem rgb(37 104 79 / 14%);
 }
 
 input[aria-invalid="true"] {
   border-color: #c84b32;
+}
+
+textarea:disabled,
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button:disabled:hover {
+  transform: none;
 }
 
 .button {
@@ -250,6 +263,98 @@ input[aria-invalid="true"] {
   text-underline-offset: 0.2em;
 }
 
+.live-room-card {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.live-room-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.connection-status {
+  flex: none;
+  margin: 0;
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+  color: #315245;
+  background: #e9f1ec;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.connection-status[data-state="disconnected"] {
+  color: #8c2e1d;
+  background: #f8e7e2;
+}
+
+.participant-identity,
+.connection-copy {
+  margin: 0;
+  color: #53605a;
+}
+
+.admin-badge {
+  display: inline-flex;
+  margin-left: 0.45rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  color: #6e3d0d;
+  background: #f3d79e;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.participant-panel {
+  border-block: 1px solid rgb(23 33 29 / 12%);
+  padding-block: 1.25rem;
+}
+
+.participant-panel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 0.86rem;
+}
+
+.participant-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.participant-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.composer {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.composer .button,
+.connection-recovery .button {
+  margin-top: 0.25rem;
+}
+
+.connection-recovery {
+  border-top: 1px solid rgb(23 33 29 / 12%);
+  padding-top: 1rem;
+}
+
+.connection-recovery p {
+  margin: 0;
+  color: #8c2e1d;
+}
+
 @media (max-width: 760px) {
   .entry-layout {
     grid-template-columns: 1fr;
@@ -257,5 +362,9 @@ input[aria-invalid="true"] {
 
   h1 {
     max-width: 10ch;
+  }
+
+  .live-room-heading {
+    display: grid;
   }
 }

@@ -1,6 +1,7 @@
 .worktrees/
 node_modules/
 .nuxt/
+.partykit/
 .output/
 dist
 test-results/

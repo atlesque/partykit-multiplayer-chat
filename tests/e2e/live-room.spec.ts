@@ -1,0 +1,34 @@
+import { expect, test } from '@playwright/test'
+
+const roomId = '550e8400-e29b-41d4-a716-446655440000'
+
+test('enters a real PartyKit Room as its first authoritative Participant', async ({ page }) => {
+  const partySockets: string[] = []
+  page.on('websocket', (socket) => {
+    if (new URL(socket.url()).pathname.startsWith('/parties/main/')) {
+      partySockets.push(socket.url())
+    }
+  })
+
+  await page.goto(`/rooms/${roomId}`)
+
+  await expect(page.getByRole('heading', { name: 'Choose a name to enter this Room' })).toBeVisible()
+  await expect.poll(() => partySockets).toHaveLength(0)
+
+  await page.getByLabel('Chosen Name').fill('Alex')
+  await page.getByRole('button', { name: 'Enter Room' }).click()
+
+  await expect(page.getByTestId('connection-status')).toHaveText('Connected')
+  await expect(page.getByRole('heading', { name: 'Room is live' })).toBeVisible()
+  const participants = page.getByLabel('Participants')
+  await expect(participants.getByText('Alex#1', { exact: true })).toBeVisible()
+  await expect(participants.getByText('Admin', { exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
+  await expect.poll(() => partySockets).toHaveLength(1)
+
+  const socketUrl = new URL(partySockets[0]!)
+  expect(socketUrl.pathname).toBe(`/parties/main/${roomId}`)
+  expect(socketUrl.searchParams.get('name')).toBe('Alex')
+  expect(socketUrl.searchParams.has('participantId')).toBe(false)
+})

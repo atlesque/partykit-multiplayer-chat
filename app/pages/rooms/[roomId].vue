@@ -8,11 +8,41 @@ const { chosenName, hasRememberedChosenName, rememberChosenName } = useChosenNam
 })
 const chosenNameError = ref('')
 const isReady = computed(() => roomIdResult.value.ok && hasRememberedChosenName.value)
+const runtimeConfig = useRuntimeConfig()
+const roomConnection = shallowRef<ReturnType<typeof useRoomConnection> | null>(null)
+const connectionStatus = computed(() => roomConnection.value?.status.value ?? 'joining')
+const connectionStatusLabel = computed(() => ({
+  joining: 'Joining',
+  connected: 'Connected',
+  reconnecting: 'Reconnecting',
+  disconnected: 'Disconnected',
+}[connectionStatus.value]))
+const snapshot = computed(() => roomConnection.value?.snapshot.value ?? null)
+const selfParticipant = computed(() => snapshot.value?.participants.find(
+  participant => participant.id === snapshot.value?.selfId,
+))
+const connectionError = computed(() => roomConnection.value?.error.value ?? '')
 
 function enterRoom() {
   const result = rememberChosenName(chosenName.value)
   chosenNameError.value = result.ok ? '' : result.message
 }
+
+watch(isReady, (ready) => {
+  if (!ready || !roomIdResult.value.ok || !import.meta.client) {
+    return
+  }
+
+  roomConnection.value?.stop()
+  roomConnection.value = useRoomConnection({
+    roomId: roomIdResult.value.roomId,
+    chosenName: chosenName.value,
+    host: String(runtimeConfig.public.partyKitHost),
+  })
+  roomConnection.value.start()
+}, { immediate: true })
+
+onBeforeUnmount(() => roomConnection.value?.stop())
 </script>
 
 <template>
@@ -60,15 +90,67 @@ function enterRoom() {
         </button>
       </section>
 
-      <section v-else class="room-card">
-        <p class="eyebrow">Room found</p>
-        <h1>Ready to connect</h1>
+      <section v-else class="room-card live-room-card">
+        <div class="live-room-heading">
+          <div>
+            <p class="eyebrow">PartyKit Room</p>
+            <h1>Room is live</h1>
+          </div>
+          <p
+            class="connection-status"
+            :data-state="connectionStatus"
+            data-testid="connection-status"
+            role="status"
+            aria-live="polite"
+          >
+            {{ connectionStatusLabel }}
+          </p>
+        </div>
         <p class="room-id">{{ roomIdResult.roomId }}</p>
-        <p class="ready-status">Joining as {{ chosenName }}</p>
-        <p class="intro">
-          Your name is set. This Room is ready for its live connection.
+
+        <template v-if="snapshot">
+          <p class="participant-identity">
+            You are <strong>{{ selfParticipant?.displayName }}</strong>
+            <span v-if="selfParticipant?.isAdmin" class="admin-badge">Admin</span>
+          </p>
+
+          <section class="participant-panel" aria-labelledby="participant-heading">
+            <h2 id="participant-heading">Participants</h2>
+            <ol class="participant-list">
+              <li v-for="participant in snapshot.participants" :key="participant.id">
+                <span>{{ participant.displayName }}</span>
+                <span v-if="participant.isAdmin" class="admin-badge">Admin</span>
+              </li>
+            </ol>
+          </section>
+        </template>
+        <p v-else-if="connectionStatus !== 'disconnected'" class="connection-copy">
+          Establishing an authoritative participation as {{ chosenName }}.
         </p>
-        <NuxtLink class="text-link" to="/">Return home</NuxtLink>
+
+        <div class="composer" aria-label="Message composer">
+          <label class="field-label" for="message-draft">Message</label>
+          <textarea
+            id="message-draft"
+            rows="3"
+            :disabled="connectionStatus !== 'connected'"
+          />
+          <button
+            class="button button-primary"
+            type="button"
+            :disabled="connectionStatus !== 'connected'"
+          >
+            Send
+          </button>
+        </div>
+
+        <div v-if="connectionStatus === 'disconnected'" class="connection-recovery">
+          <p role="alert">{{ connectionError || 'The Room connection ended.' }}</p>
+          <button class="button button-secondary" type="button" @click="roomConnection?.retry()">
+            Retry
+          </button>
+          <NuxtLink class="text-link" to="/">Return home</NuxtLink>
+        </div>
       </section>
     </div>
   </main>
