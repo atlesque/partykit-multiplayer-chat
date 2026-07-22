@@ -70,4 +70,19 @@ describe('RoomCore', () => {
       'participant-3',
     ])
   })
+
+  it('starts a fresh Room lifetime after the final Participant disconnects', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+
+    room.disconnect(first.participant.id)
+    const nextLifetime = room.connect('Alex')
+
+    expect(nextLifetime.participant).toMatchObject({
+      id: 'participant-2',
+      displayName: 'Alex#1',
+      joinSequence: 1,
+      isAdmin: true,
+    })
+  })
 })

@@ -46,6 +46,10 @@ export class RoomCore {
 
   disconnect(participantId: string): void {
     this.#participants.delete(participantId)
+    if (this.#participants.size === 0) {
+      this.#suffixes.clear()
+      this.#nextJoinSequence = 0
+    }
   }
 
   #snapshotFor(selfId: string): RoomSnapshot {

@@ -33,7 +33,7 @@ function defaultCancelSchedule(handle: unknown): void {
 }
 
 function isLocalHost(host: string): boolean {
-  const hostname = host.split(':')[0]
+  const hostname = new URL(`ws://${host}`).hostname
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
 
@@ -48,6 +48,32 @@ export function buildPartyKitWebSocketUrl(
   return url.toString()
 }
 
+function isParticipant(value: unknown): value is RoomSnapshot['participants'][number] {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const participant = value as Record<string, unknown>
+  return typeof participant.id === 'string'
+    && typeof participant.chosenName === 'string'
+    && typeof participant.displayName === 'string'
+    && Number.isInteger(participant.joinSequence)
+    && Number(participant.joinSequence) > 0
+    && typeof participant.isAdmin === 'boolean'
+}
+
+function isMessage(value: unknown): value is RoomSnapshot['messages'][number] {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const message = value as Record<string, unknown>
+  return typeof message.id === 'string'
+    && typeof message.participantId === 'string'
+    && typeof message.displayName === 'string'
+    && typeof message.text === 'string'
+    && typeof message.timestamp === 'number'
+    && Number.isFinite(message.timestamp)
+}
+
 function parseSnapshot(data: string): RoomSnapshot | null {
   try {
     const event = JSON.parse(data) as ServerEvent
@@ -57,6 +83,8 @@ function parseSnapshot(data: string): RoomSnapshot | null {
       || typeof event.adminId !== 'string'
       || !Array.isArray(event.participants)
       || !Array.isArray(event.messages)
+      || !event.participants.every(isParticipant)
+      || !event.messages.every(isMessage)
     ) {
       return null
     }
@@ -119,11 +147,18 @@ export function useRoomConnection(options: RoomConnectionOptions) {
     status.value = nextStatus
     error.value = ''
     const attemptGeneration = ++generation
-    const nextSocket = createSocket(buildPartyKitWebSocketUrl(
-      options.host,
-      options.roomId,
-      options.chosenName,
-    ))
+    let nextSocket: RoomSocket
+    try {
+      nextSocket = createSocket(buildPartyKitWebSocketUrl(
+        options.host,
+        options.roomId,
+        options.chosenName,
+      ))
+    }
+    catch {
+      failAttempt(attemptGeneration)
+      return
+    }
     socket = nextSocket
 
     nextSocket.onmessage = (event: MessageEvent<string>) => {

@@ -28,12 +28,17 @@ function enterRoom() {
   chosenNameError.value = result.ok ? '' : result.message
 }
 
-watch(isReady, (ready) => {
+watch([
+  isReady,
+  () => roomIdResult.value.ok ? roomIdResult.value.roomId : null,
+], ([ready]) => {
+  roomConnection.value?.stop()
+  roomConnection.value = null
+
   if (!ready || !roomIdResult.value.ok || !import.meta.client) {
     return
   }
 
-  roomConnection.value?.stop()
   roomConnection.value = useRoomConnection({
     roomId: roomIdResult.value.roomId,
     chosenName: chosenName.value,

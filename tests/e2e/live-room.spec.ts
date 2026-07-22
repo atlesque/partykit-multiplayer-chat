@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test'
 
 const roomId = '550e8400-e29b-41d4-a716-446655440000'
+const secondRoomId = '6ba7b810-9dad-41d1-80b4-00c04fd430c8'
+const isolatedRoomId = '6ba7b811-9dad-41d1-80b4-00c04fd430c8'
 
-test('enters a real PartyKit Room as its first authoritative Participant', async ({ page }) => {
+test('enters a real PartyKit Room as its first authoritative Participant', async ({ page, browser }) => {
   const partySockets: string[] = []
   page.on('websocket', (socket) => {
     if (new URL(socket.url()).pathname.startsWith('/parties/main/')) {
@@ -31,4 +33,19 @@ test('enters a real PartyKit Room as its first authoritative Participant', async
   expect(socketUrl.pathname).toBe(`/parties/main/${roomId}`)
   expect(socketUrl.searchParams.get('name')).toBe('Alex')
   expect(socketUrl.searchParams.has('participantId')).toBe(false)
+
+  await page.goto(`/rooms/${secondRoomId}`)
+  await expect(page.getByTestId('connection-status')).toHaveText('Connected')
+  await expect.poll(() => partySockets).toHaveLength(2)
+  expect(new URL(partySockets[1]!).pathname).toBe(`/parties/main/${secondRoomId}`)
+
+  const secondContext = await browser.newContext()
+  const secondPage = await secondContext.newPage()
+  await secondPage.goto(`/rooms/${isolatedRoomId}`)
+  await secondPage.getByLabel('Chosen Name').fill('Blair')
+  await secondPage.getByRole('button', { name: 'Enter Room' }).click()
+  await expect(secondPage.getByTestId('connection-status')).toHaveText('Connected')
+  await expect(secondPage.getByLabel('Participants').getByText('Blair#1')).toBeVisible()
+  await expect(secondPage.getByLabel('Participants').getByText('Admin')).toBeVisible()
+  await secondContext.close()
 })
