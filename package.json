@@ -9,7 +9,12 @@
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:live": "playwright test --config playwright.live.config.ts",
+    "test:deploy": "playwright test --config playwright.deploy.config.ts",
     "dev:party": "partykit dev --port 1999",
+    "preview:frontend": "wrangler dev --ip 127.0.0.1",
+    "deploy:frontend": "pnpm generate && wrangler deploy",
+    "deploy:frontend:dry-run": "pnpm generate && wrangler deploy --dry-run",
+    "deploy:partykit": "partykit deploy",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
@@ -21,7 +26,8 @@
     "@playwright/test": "^1.50.0",
     "partykit": "^0.0.115",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.113.0"
   },
   "packageManager": "pnpm@10.32.1"
 }

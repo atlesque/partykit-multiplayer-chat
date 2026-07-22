@@ -2,8 +2,12 @@
 node_modules/
 .nuxt/
 .partykit/
+.wrangler/
 .pnpm-store/
 .output/
 dist
 test-results/
 playwright-report/
+.env
+.env.*
+!.env.example
