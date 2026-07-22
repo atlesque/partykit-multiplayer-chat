@@ -1,8 +1,47 @@
 import type * as Party from 'partykit/server'
-import { RoomCore } from '../server/room-core'
+import { RateLimitError, RoomCore, RoomFullError } from '../server/room-core'
 import { serializeServerEvent, type ClientEvent } from '../shared/protocol'
 
 const INVALID_NAME_CLOSE_CODE = 4001
+const ROOM_FULL_CLOSE_CODE = 4002
+const ORIGIN_NOT_ALLOWED_CLOSE_CODE = 4003
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+}
+
+function isAllowedOrigin(request: Request, configuredOrigin: unknown): boolean {
+  if (typeof configuredOrigin === 'string' && configuredOrigin.length > 0) {
+    try {
+      return request.headers.get('Origin') === new URL(configuredOrigin).origin
+    }
+    catch {
+      return false
+    }
+  }
+  return isLocalHostname(new URL(request.url).hostname)
+}
+
+function parseClientEvent(message: string): ClientEvent | null {
+  try {
+    const event = JSON.parse(message) as unknown
+    if (!event || typeof event !== 'object' || Array.isArray(event)) {
+      return null
+    }
+    const record = event as Record<string, unknown>
+    if (
+      Object.keys(record).length !== 2
+      || record.type !== 'send-message'
+      || typeof record.text !== 'string'
+    ) {
+      return null
+    }
+    return { type: 'send-message', text: record.text }
+  }
+  catch {
+    return null
+  }
+}
 
 export default class Server implements Party.Server {
   readonly options = { hibernate: false }
@@ -16,6 +55,10 @@ export default class Server implements Party.Server {
     connection: Party.Connection,
     context: Party.ConnectionContext,
   ): Promise<void> {
+    if (!isAllowedOrigin(context.request, this.room.env.FRONTEND_ORIGIN)) {
+      connection.close(ORIGIN_NOT_ALLOWED_CLOSE_CODE, 'Origin is not allowed')
+      return
+    }
     const name = new URL(context.request.url).searchParams.get('name') ?? ''
 
     try {
@@ -38,6 +81,10 @@ export default class Server implements Party.Server {
       }
     }
     catch (error) {
+      if (error instanceof RoomFullError) {
+        connection.close(ROOM_FULL_CLOSE_CODE, error.message)
+        return
+      }
       const reason = error instanceof Error ? error.message : 'Invalid Chosen Name.'
       connection.close(INVALID_NAME_CLOSE_CODE, reason)
     }
@@ -56,14 +103,8 @@ export default class Server implements Party.Server {
       return
     }
 
-    let event: ClientEvent
-    try {
-      event = JSON.parse(message) as ClientEvent
-    }
-    catch {
-      return
-    }
-    if (event.type !== 'send-message' || typeof event.text !== 'string') {
+    const event = parseClientEvent(message)
+    if (!event) {
       return
     }
 
@@ -80,9 +121,10 @@ export default class Server implements Party.Server {
       }
     }
     catch (error) {
+      const rateLimited = error instanceof RateLimitError
       sender.send(serializeServerEvent({
         type: 'error',
-        code: 'invalid-message',
+        code: rateLimited ? 'rate-limited' : 'invalid-message',
         message: error instanceof Error ? error.message : 'Message was rejected.',
         recoverable: true,
       }))

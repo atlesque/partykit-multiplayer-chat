@@ -30,8 +30,8 @@ async function connect(server: Server, connection: FakeConnection): Promise<void
   )
 }
 
-function createServer() {
-  const room = { id: 'room-1' } as Party.Room
+function createServer(env: Record<string, unknown> = {}) {
+  const room = { id: 'room-1', env } as Party.Room
   return new Server(room)
 }
 
@@ -219,5 +219,123 @@ describe('PartyKit Room adapter', () => {
     }])
     expect(events(second)).toEqual([])
     expect(first.close).not.toHaveBeenCalled()
+  })
+
+  it('closes the 51st Participant with the Room capacity code and reason', async () => {
+    const server = createServer()
+    const connections = Array.from(
+      { length: 51 },
+      (_, index) => createConnection(`User${index + 1}`, `connection-${index + 1}`),
+    )
+
+    for (const connection of connections) {
+      await connect(server, connection)
+    }
+
+    expect(connections[50]!.send).not.toHaveBeenCalled()
+    expect(connections[50]!.close).toHaveBeenCalledWith(4002, 'Room is full')
+    expect(connections[0]!.close).not.toHaveBeenCalled()
+  })
+
+  it('returns recoverable rate-limit feedback without disrupting peers', async () => {
+    const server = createServer()
+    const first = createConnection('Alex', 'connection-1')
+    const second = createConnection('Blair', 'connection-2')
+    await connect(server, first)
+    await connect(server, second)
+    first.send.mockClear()
+    second.send.mockClear()
+
+    for (let index = 1; index <= 6; index++) {
+      await server.onMessage(
+        JSON.stringify({ type: 'send-message', text: `Message ${index}` }),
+        first as unknown as Party.Connection,
+      )
+    }
+
+    expect(events(first).slice(0, 5).every(event => event.type === 'message')).toBe(true)
+    expect(events(first)[5]).toEqual({
+      type: 'error',
+      code: 'rate-limited',
+      message: 'You can send at most 5 Messages every 10 seconds.',
+      recoverable: true,
+    })
+    expect(events(second)).toHaveLength(5)
+    expect(first.close).not.toHaveBeenCalled()
+  })
+
+  it('isolates malformed, binary, unknown, and authority-claiming payloads', async () => {
+    const server = createServer()
+    const first = createConnection('Alex', 'connection-1')
+    const second = createConnection('Blair', 'connection-2')
+    await connect(server, first)
+    await connect(server, second)
+    first.send.mockClear()
+    second.send.mockClear()
+
+    const hostilePayloads: Array<string | ArrayBuffer> = [
+      '{',
+      new ArrayBuffer(8),
+      JSON.stringify({ type: 'unknown', text: 'Injected' }),
+      JSON.stringify({ type: 'send-message', text: 'Injected', isAdmin: true }),
+      JSON.stringify({ type: 'send-message', text: 'Injected', participantId: 'forged' }),
+      JSON.stringify({ type: 'send-message', text: 42 }),
+    ]
+    for (const payload of hostilePayloads) {
+      await server.onMessage(payload, first as unknown as Party.Connection)
+    }
+
+    expect(events(first)).toEqual([])
+    expect(events(second)).toEqual([])
+    expect(first.close).not.toHaveBeenCalled()
+  })
+
+  it('rejects a configured origin mismatch before joining Room state', async () => {
+    const server = createServer({ FRONTEND_ORIGIN: 'https://chat.example.com' })
+    const rejected = createConnection('Alex', 'connection-1')
+    const request = new Request(rejected.uri, {
+      headers: { Origin: 'https://evil.example.com' },
+    })
+
+    await server.onConnect(
+      rejected as unknown as Party.Connection,
+      { request } as Party.ConnectionContext,
+    )
+
+    expect(rejected.send).not.toHaveBeenCalled()
+    expect(rejected.close).toHaveBeenCalledWith(4003, 'Origin is not allowed')
+  })
+
+  it('accepts an exact configured origin', async () => {
+    const server = createServer({ FRONTEND_ORIGIN: 'https://chat.example.com' })
+    const accepted = createConnection('Alex', 'connection-1')
+    const request = new Request(accepted.uri, {
+      headers: { Origin: 'https://chat.example.com' },
+    })
+
+    await server.onConnect(
+      accepted as unknown as Party.Connection,
+      { request } as Party.ConnectionContext,
+    )
+
+    expect(accepted.close).not.toHaveBeenCalled()
+    expect(events(accepted)[0]?.type).toBe('snapshot')
+  })
+
+  it('requires origin configuration when the PartyKit endpoint is not local', async () => {
+    const server = createServer()
+    const rejected = createConnection('Alex', 'connection-1')
+    const request = new Request(
+      'https://partykit.example.com/parties/main/room-1?name=Alex',
+      { headers: { Origin: 'https://chat.example.com' } },
+    )
+
+    await server.onConnect(
+      rejected as unknown as Party.Connection,
+      { request } as Party.ConnectionContext,
+    )
+
+    expect(rejected.send).not.toHaveBeenCalled()
+    expect(rejected.close).toHaveBeenCalledWith(4003, 'Origin is not allowed')
   })
 })

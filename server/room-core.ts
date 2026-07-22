@@ -16,6 +16,24 @@ export type DisconnectedParticipant = {
   notices: RoomNotice[]
 }
 
+export class RoomFullError extends Error {
+  constructor() {
+    super('Room is full')
+    this.name = 'RoomFullError'
+  }
+}
+
+export class RateLimitError extends Error {
+  constructor() {
+    super('You can send at most 5 Messages every 10 seconds.')
+    this.name = 'RateLimitError'
+  }
+}
+
+const MAX_PARTICIPANTS = 50
+const MAX_MESSAGES_PER_WINDOW = 5
+const MESSAGE_WINDOW_MS = 10_000
+
 export class RoomCore {
   readonly #createParticipantId: () => string
   readonly #createMessageId: () => string
@@ -23,6 +41,7 @@ export class RoomCore {
   readonly #participants = new Map<string, Participant>()
   readonly #suffixes = new Map<string, number>()
   readonly #messages: Message[] = []
+  readonly #acceptedMessageTimes = new Map<string, number[]>()
   #nextJoinSequence = 0
 
   constructor(
@@ -43,6 +62,9 @@ export class RoomCore {
     const chosenName = parseChosenName(input)
     if (!chosenName.ok) {
       throw new Error(chosenName.message)
+    }
+    if (this.#participants.size >= MAX_PARTICIPANTS) {
+      throw new RoomFullError()
     }
 
     const suffix = (this.#suffixes.get(chosenName.value) ?? 0) + 1
@@ -85,6 +107,7 @@ export class RoomCore {
 
     const wasAdmin = this.#presence().adminId === participantId
     this.#participants.delete(participantId)
+    this.#acceptedMessageTimes.delete(participantId)
     const presence = this.#presence()
     const notices: RoomNotice[] = [{
       type: 'notice',
@@ -103,6 +126,7 @@ export class RoomCore {
     if (this.#participants.size === 0) {
       this.#suffixes.clear()
       this.#messages.length = 0
+      this.#acceptedMessageTimes.clear()
       this.#nextJoinSequence = 0
     }
 
@@ -123,12 +147,23 @@ export class RoomCore {
       throw new Error('Message must contain at most 500 characters.')
     }
 
+    const now = this.#now()
+    const windowStart = now - MESSAGE_WINDOW_MS
+    const acceptedTimes = (this.#acceptedMessageTimes.get(participantId) ?? [])
+      .filter(timestamp => timestamp > windowStart)
+    if (acceptedTimes.length >= MAX_MESSAGES_PER_WINDOW) {
+      this.#acceptedMessageTimes.set(participantId, acceptedTimes)
+      throw new RateLimitError()
+    }
+    acceptedTimes.push(now)
+    this.#acceptedMessageTimes.set(participantId, acceptedTimes)
+
     const message: Message = {
       id: this.#createMessageId(),
       participantId,
       displayName: participant.displayName,
       text,
-      timestamp: this.#now(),
+      timestamp: now,
     }
     this.#messages.push(message)
     if (this.#messages.length > 100) {

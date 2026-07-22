@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RoomCore } from './room-core'
+import { RateLimitError, RoomCore, RoomFullError } from './room-core'
 
 function createRoom() {
   let nextId = 0
@@ -168,7 +168,7 @@ describe('RoomCore', () => {
       participantId: first.participant.id,
       displayName: 'Alex#1',
       text: 'Hello Room',
-      timestamp: 1_750_000_000_001,
+      timestamp: 1_750_000_000_000,
     })
     expect(room.connect('Blair').snapshot.messages).toEqual([message])
   })
@@ -197,7 +197,14 @@ describe('RoomCore', () => {
   })
 
   it('retains only the latest 100 Messages', () => {
-    const room = createRoom()
+    let now = 1_750_000_000_000
+    let nextId = 0
+    let nextMessageId = 0
+    const room = new RoomCore(
+      () => `participant-${++nextId}`,
+      () => `message-${++nextMessageId}`,
+      () => (now += 10_000),
+    )
     const first = room.connect('Alex')
 
     for (let index = 1; index <= 101; index++) {
@@ -216,5 +223,72 @@ describe('RoomCore', () => {
     expect(() => room.acceptMessage('missing', 'Hello')).toThrow(
       'Participant is not connected to this Room.',
     )
+  })
+
+  it('accepts at most 50 simultaneous Participants without consuming allocation state', () => {
+    const room = createRoom()
+
+    for (let index = 1; index <= 50; index++) {
+      room.connect(`User${index}`)
+    }
+
+    expect(() => room.connect('Overflow')).toThrow(RoomFullError)
+    expect(() => room.connect('Overflow')).toThrow('Room is full')
+    expect(room.participantCount).toBe(50)
+  })
+
+  it('limits each Participant to five accepted Messages in a rolling ten-second window', () => {
+    let now = 1_000
+    let nextMessageId = 0
+    const room = new RoomCore(
+      () => 'participant-1',
+      () => `message-${++nextMessageId}`,
+      () => now,
+    )
+    const participant = room.connect('Alex').participant
+
+    for (let index = 1; index <= 5; index++) {
+      room.acceptMessage(participant.id, `Message ${index}`)
+    }
+
+    expect(() => room.acceptMessage(participant.id, 'Message 6')).toThrow(RateLimitError)
+    expect(() => room.acceptMessage(participant.id, 'Message 6')).toThrow(
+      'You can send at most 5 Messages every 10 seconds.',
+    )
+
+    now = 11_000
+    expect(room.acceptMessage(participant.id, 'Message 6').text).toBe('Message 6')
+  })
+
+  it('does not charge invalid attempts against the accepted-Message limit', () => {
+    const room = createRoom()
+    const participant = room.connect('Alex').participant
+
+    for (let index = 1; index <= 4; index++) {
+      room.acceptMessage(participant.id, `Message ${index}`)
+    }
+    expect(() => room.acceptMessage(participant.id, '   ')).toThrow(
+      'Message must contain at least one non-whitespace character.',
+    )
+
+    expect(room.acceptMessage(participant.id, 'Message 5').text).toBe('Message 5')
+    expect(() => room.acceptMessage(participant.id, 'Message 6')).toThrow(RateLimitError)
+  })
+
+  it('isolates rate limits by Participant and clears them on disconnect', () => {
+    const participantIds = ['participant-1', 'participant-2', 'participant-1']
+    const room = new RoomCore(() => participantIds.shift()!)
+    const first = room.connect('Alex').participant
+    const second = room.connect('Blair').participant
+
+    for (let index = 1; index <= 5; index++) {
+      room.acceptMessage(first.id, `Alex ${index}`)
+    }
+    expect(room.acceptMessage(second.id, 'Blair 1').text).toBe('Blair 1')
+
+    room.disconnect(first.id)
+    room.disconnect(second.id)
+    const fresh = room.connect('Alex').participant
+    expect(room.acceptMessage(fresh.id, 'Fresh lifetime').text).toBe('Fresh lifetime')
   })
 })
