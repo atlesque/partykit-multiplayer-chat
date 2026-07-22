@@ -1,4 +1,6 @@
 .worktrees/
+.scratch/
+docs/
 node_modules/
 .nuxt/
 .partykit/
