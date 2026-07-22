@@ -1,5 +1,5 @@
 import { parseChosenName } from '../app/domain/chosen-name'
-import type { Participant, RoomSnapshot, ServerEvent } from '../shared/protocol'
+import type { Message, Participant, RoomSnapshot, ServerEvent } from '../shared/protocol'
 
 export type PresenceState = Pick<RoomSnapshot, 'adminId' | 'participants'>
 export type RoomNotice = Extract<ServerEvent, { type: 'notice' }>
@@ -18,12 +18,21 @@ export type DisconnectedParticipant = {
 
 export class RoomCore {
   readonly #createParticipantId: () => string
+  readonly #createMessageId: () => string
+  readonly #now: () => number
   readonly #participants = new Map<string, Participant>()
   readonly #suffixes = new Map<string, number>()
+  readonly #messages: Message[] = []
   #nextJoinSequence = 0
 
-  constructor(createParticipantId: () => string) {
+  constructor(
+    createParticipantId: () => string,
+    createMessageId: () => string = () => crypto.randomUUID(),
+    now: () => number = () => Date.now(),
+  ) {
     this.#createParticipantId = createParticipantId
+    this.#createMessageId = createMessageId
+    this.#now = now
   }
 
   get participantCount(): number {
@@ -55,7 +64,7 @@ export class RoomCore {
       snapshot: {
         selfId: participant.id,
         ...presence,
-        messages: [],
+        messages: this.#messages.map(message => ({ ...message })),
       },
       presence,
       notices: hadParticipants
@@ -93,10 +102,39 @@ export class RoomCore {
 
     if (this.#participants.size === 0) {
       this.#suffixes.clear()
+      this.#messages.length = 0
       this.#nextJoinSequence = 0
     }
 
     return { presence, notices }
+  }
+
+  acceptMessage(participantId: string, input: string): Message {
+    const participant = this.#participants.get(participantId)
+    if (!participant) {
+      throw new Error('Participant is not connected to this Room.')
+    }
+
+    const text = input.trim()
+    if (!text) {
+      throw new Error('Message must contain at least one non-whitespace character.')
+    }
+    if (Array.from(text).length > 500) {
+      throw new Error('Message must contain at most 500 characters.')
+    }
+
+    const message: Message = {
+      id: this.#createMessageId(),
+      participantId,
+      displayName: participant.displayName,
+      text,
+      timestamp: this.#now(),
+    }
+    this.#messages.push(message)
+    if (this.#messages.length > 100) {
+      this.#messages.shift()
+    }
+    return { ...message }
   }
 
   #presence(): PresenceState {

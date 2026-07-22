@@ -133,7 +133,8 @@ textarea:focus {
   box-shadow: 0 0 0 0.22rem rgb(37 104 79 / 14%);
 }
 
-input[aria-invalid="true"] {
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
   border-color: #c84b32;
 }
 
@@ -323,6 +324,61 @@ button:disabled:hover {
 .activity-panel {
   border-bottom: 1px solid rgb(23 33 29 / 12%);
   padding-bottom: 1.25rem;
+}
+
+.message-panel {
+  display: grid;
+  gap: 0.8rem;
+  border-bottom: 1px solid rgb(23 33 29 / 12%);
+  padding-bottom: 1.25rem;
+}
+
+.message-panel h2 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.message-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 24rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.message-list li {
+  border-radius: 0.85rem;
+  padding: 0.8rem 0.9rem;
+  background: #f3f6f3;
+}
+
+.message-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #53605a;
+  font-size: 0.76rem;
+}
+
+.message-list p,
+.empty-messages {
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.empty-messages {
+  color: #6b746f;
+  font-size: 0.86rem;
+}
+
+.message-guidance {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
 }
 
 .activity-panel h2 {

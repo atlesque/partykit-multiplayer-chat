@@ -11,6 +11,7 @@ class FakeSocket implements RoomSocket {
   onclose: ((event: CloseEvent) => void) | null = null
   onerror: ((event: Event) => void) | null = null
   close = vi.fn()
+  send = vi.fn()
 
   message(event: ServerEvent) {
     this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent<string>)
@@ -264,5 +265,59 @@ describe('useRoomConnection', () => {
     scheduled[0]!()
     expect(connection.status.value).toBe('disconnected')
     expect(connection.error.value).toBe('Unable to connect to this Room.')
+  })
+
+  it('sends a typed Message request only while connected', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+
+    expect(connection.sendMessage('Hello')).toBe(false)
+    expect(sockets[0]!.send).not.toHaveBeenCalled()
+
+    sockets[0]!.message(snapshot())
+    expect(connection.sendMessage('  Hello Room  ')).toBe(true)
+    expect(sockets[0]!.send).toHaveBeenCalledWith(JSON.stringify({
+      type: 'send-message',
+      text: '  Hello Room  ',
+    }))
+  })
+
+  it('appends authoritative Messages and exposes self acknowledgements', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+
+    sockets[0]!.message({
+      type: 'message',
+      message: {
+        id: 'message-1',
+        participantId: 'participant-1',
+        displayName: 'Alex#1',
+        text: 'Hello Room',
+        timestamp: 1_750_000_000_000,
+      },
+    })
+
+    expect(connection.snapshot.value?.messages).toHaveLength(1)
+    expect(connection.acknowledgedMessage.value?.id).toBe('message-1')
+  })
+
+  it('exposes recoverable Message errors without disconnecting', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+
+    sockets[0]!.message({
+      type: 'error',
+      code: 'invalid-message',
+      message: 'Message must contain at least one non-whitespace character.',
+      recoverable: true,
+    })
+
+    expect(connection.status.value).toBe('connected')
+    expect(connection.messageError.value).toBe(
+      'Message must contain at least one non-whitespace character.',
+    )
+    expect(connection.acknowledgedMessage.value).toBeNull()
   })
 })

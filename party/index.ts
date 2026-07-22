@@ -1,6 +1,6 @@
 import type * as Party from 'partykit/server'
 import { RoomCore } from '../server/room-core'
-import { serializeServerEvent } from '../shared/protocol'
+import { serializeServerEvent, type ClientEvent } from '../shared/protocol'
 
 const INVALID_NAME_CLOSE_CODE = 4001
 
@@ -49,6 +49,44 @@ export default class Server implements Party.Server {
 
   async onError(connection: Party.Connection): Promise<void> {
     this.#disconnect(connection.id)
+  }
+
+  async onMessage(message: string | ArrayBuffer, sender: Party.Connection): Promise<void> {
+    if (typeof message !== 'string') {
+      return
+    }
+
+    let event: ClientEvent
+    try {
+      event = JSON.parse(message) as ClientEvent
+    }
+    catch {
+      return
+    }
+    if (event.type !== 'send-message' || typeof event.text !== 'string') {
+      return
+    }
+
+    const participantId = this.#participantByConnection.get(sender.id)
+    if (!participantId) {
+      return
+    }
+
+    try {
+      const accepted = this.#core.acceptMessage(participantId, event.text)
+      const serialized = serializeServerEvent({ type: 'message', message: accepted })
+      for (const connection of this.#connections.values()) {
+        connection.send(serialized)
+      }
+    }
+    catch (error) {
+      sender.send(serializeServerEvent({
+        type: 'error',
+        code: 'invalid-message',
+        message: error instanceof Error ? error.message : 'Message was rejected.',
+        recoverable: true,
+      }))
+    }
   }
 
   #disconnect(connectionId: string): void {

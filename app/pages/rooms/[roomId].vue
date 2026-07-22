@@ -23,11 +23,33 @@ const selfParticipant = computed(() => snapshot.value?.participants.find(
 ))
 const connectionError = computed(() => roomConnection.value?.error.value ?? '')
 const activity = computed(() => roomConnection.value?.activity.value ?? [])
+const messages = computed(() => snapshot.value?.messages ?? [])
+const messageDraft = ref('')
+const messageLength = computed(() => Array.from(messageDraft.value).length)
+const messageError = computed(() => roomConnection.value?.messageError.value ?? '')
+const acknowledgedMessage = computed(() => roomConnection.value?.acknowledgedMessage.value ?? null)
 
 function enterRoom() {
   const result = rememberChosenName(chosenName.value)
   chosenNameError.value = result.ok ? '' : result.message
 }
+
+function sendMessage() {
+  roomConnection.value?.sendMessage(messageDraft.value)
+}
+
+function formatTimestamp(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)
+}
+
+watch(acknowledgedMessage, (accepted, previous) => {
+  if (accepted && accepted.id !== previous?.id && messageDraft.value.trim() === accepted.text) {
+    messageDraft.value = ''
+  }
+})
 
 watch([
   isReady,
@@ -146,26 +168,56 @@ onBeforeUnmount(() => roomConnection.value?.stop())
               </li>
             </ol>
           </section>
+
+          <section class="message-panel" aria-labelledby="message-heading">
+            <h2 id="message-heading">Messages</h2>
+            <ol
+              v-if="messages.length"
+              class="message-list"
+              aria-label="Conversation"
+              aria-live="polite"
+            >
+              <li v-for="message in messages" :key="message.id">
+                <div class="message-meta">
+                  <strong>{{ message.displayName }}</strong>
+                  <time :datetime="new Date(message.timestamp).toISOString()">
+                    {{ formatTimestamp(message.timestamp) }}
+                  </time>
+                </div>
+                <p>{{ message.text }}</p>
+              </li>
+            </ol>
+            <p v-else class="empty-messages">No Messages yet. Start the conversation.</p>
+          </section>
         </template>
         <p v-else-if="connectionStatus !== 'disconnected'" class="connection-copy">
           Establishing an authoritative participation as {{ chosenName }}.
         </p>
 
-        <div class="composer" aria-label="Message composer">
+        <form class="composer" aria-label="Message composer" @submit.prevent="sendMessage">
           <label class="field-label" for="message-draft">Message</label>
           <textarea
             id="message-draft"
+            v-model="messageDraft"
             rows="3"
             :disabled="connectionStatus !== 'connected'"
+            :aria-describedby="messageError ? 'message-error message-limit' : 'message-limit'"
+            :aria-invalid="messageError ? 'true' : undefined"
           />
+          <div class="message-guidance">
+            <p id="message-limit" class="field-help">{{ messageLength }} / 500 characters</p>
+            <p v-if="messageError" id="message-error" class="field-error" role="alert">
+              {{ messageError }}
+            </p>
+          </div>
           <button
             class="button button-primary"
-            type="button"
+            type="submit"
             :disabled="connectionStatus !== 'connected'"
           >
             Send
           </button>
-        </div>
+        </form>
 
         <div v-if="connectionStatus === 'disconnected'" class="connection-recovery">
           <p role="alert">{{ connectionError || 'The Room connection ended.' }}</p>

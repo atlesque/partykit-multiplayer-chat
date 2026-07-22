@@ -1,5 +1,5 @@
 import { readonly, ref } from 'vue'
-import type { RoomSnapshot, ServerEvent } from '../../shared/protocol'
+import type { Message, RoomSnapshot, ServerEvent } from '../../shared/protocol'
 
 export type RoomConnectionStatus =
   | 'joining'
@@ -12,6 +12,7 @@ export type RoomSocket = {
   onclose: ((event: CloseEvent) => void) | null
   onerror: ((event: Event) => void) | null
   close: () => void
+  send: (data: string) => void
 }
 
 type Schedule = (callback: () => void, delay: number) => unknown
@@ -76,7 +77,7 @@ function isMessage(value: unknown): value is RoomSnapshot['messages'][number] {
 
 type ParsedServerEvent =
   | ({ type: 'snapshot' } & RoomSnapshot)
-  | Extract<ServerEvent, { type: 'presence' | 'notice' }>
+  | Extract<ServerEvent, { type: 'presence' | 'notice' | 'message' | 'error' }>
 
 function hasValidPresence(
   adminId: unknown,
@@ -123,6 +124,17 @@ function parseServerEvent(data: string): ParsedServerEvent | null {
         && event.text.length > 0
       ) ? event : null
     }
+    if (event.type === 'message') {
+      return isMessage(event.message) ? event : null
+    }
+    if (event.type === 'error') {
+      return (
+        typeof event.code === 'string'
+        && typeof event.message === 'string'
+        && event.message.length > 0
+        && typeof event.recoverable === 'boolean'
+      ) ? event : null
+    }
     return null
   }
   catch {
@@ -135,6 +147,8 @@ export function useRoomConnection(options: RoomConnectionOptions) {
   const snapshot = ref<RoomSnapshot | null>(null)
   const activity = ref<Array<Extract<ServerEvent, { type: 'notice' }>>>([])
   const error = ref('')
+  const messageError = ref('')
+  const acknowledgedMessage = ref<Message | null>(null)
   const createSocket = options.createSocket ?? (url => new WebSocket(url))
   const schedule = options.schedule ?? defaultSchedule
   const cancelSchedule = options.cancelSchedule ?? defaultCancelSchedule
@@ -226,6 +240,21 @@ export function useRoomConnection(options: RoomConnectionOptions) {
       else if (serverEvent.type === 'notice') {
         activity.value = [...activity.value, { ...serverEvent }].slice(-20)
       }
+      else if (serverEvent.type === 'message' && snapshot.value) {
+        if (!snapshot.value.messages.some(message => message.id === serverEvent.message.id)) {
+          snapshot.value = {
+            ...snapshot.value,
+            messages: [...snapshot.value.messages, serverEvent.message].slice(-100),
+          }
+        }
+        if (serverEvent.message.participantId === snapshot.value.selfId) {
+          acknowledgedMessage.value = serverEvent.message
+          messageError.value = ''
+        }
+      }
+      else if (serverEvent.type === 'error' && serverEvent.recoverable) {
+        messageError.value = serverEvent.message
+      }
     }
     nextSocket.onerror = () => failAttempt(attemptGeneration)
     nextSocket.onclose = event => failAttempt(attemptGeneration, event.reason)
@@ -234,6 +263,8 @@ export function useRoomConnection(options: RoomConnectionOptions) {
   function start(): void {
     stopped = false
     snapshot.value = null
+    messageError.value = ''
+    acknowledgedMessage.value = null
     automaticRetryAvailable = true
     openSocket('joining')
   }
@@ -260,11 +291,24 @@ export function useRoomConnection(options: RoomConnectionOptions) {
     status.value = 'disconnected'
   }
 
+  function sendMessage(text: string): boolean {
+    if (status.value !== 'connected' || !socket) {
+      return false
+    }
+    messageError.value = ''
+    acknowledgedMessage.value = null
+    socket.send(JSON.stringify({ type: 'send-message', text }))
+    return true
+  }
+
   return {
     status: readonly(status),
     snapshot: readonly(snapshot),
     activity: readonly(activity),
     error: readonly(error),
+    messageError: readonly(messageError),
+    acknowledgedMessage: readonly(acknowledgedMessage),
+    sendMessage,
     start,
     retry,
     stop,

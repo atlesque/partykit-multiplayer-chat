@@ -166,4 +166,58 @@ describe('PartyKit Room adapter', () => {
       text: 'Blair#1 left the Room.',
     })
   })
+
+  it('broadcasts an authoritative accepted Message to every current Participant', async () => {
+    const server = createServer()
+    const first = createConnection('Alex', 'connection-1')
+    const second = createConnection('Blair', 'connection-2')
+    await connect(server, first)
+    await connect(server, second)
+    first.send.mockClear()
+    second.send.mockClear()
+
+    await server.onMessage(
+      JSON.stringify({ type: 'send-message', text: '  Hello Blair  ' }),
+      first as unknown as Party.Connection,
+    )
+
+    for (const connection of [first, second]) {
+      expect(events(connection)).toHaveLength(1)
+      expect(events(connection)[0]).toMatchObject({
+        type: 'message',
+        message: {
+          id: expect.any(String),
+          participantId: expect.any(String),
+          displayName: 'Alex#1',
+          text: 'Hello Blair',
+          timestamp: expect.any(Number),
+        },
+      })
+    }
+    expect(events(first)[0]).toEqual(events(second)[0])
+  })
+
+  it('returns a recoverable error only to the sender for an invalid Message', async () => {
+    const server = createServer()
+    const first = createConnection('Alex', 'connection-1')
+    const second = createConnection('Blair', 'connection-2')
+    await connect(server, first)
+    await connect(server, second)
+    first.send.mockClear()
+    second.send.mockClear()
+
+    await server.onMessage(
+      JSON.stringify({ type: 'send-message', text: '   ' }),
+      first as unknown as Party.Connection,
+    )
+
+    expect(events(first)).toEqual([{
+      type: 'error',
+      code: 'invalid-message',
+      message: 'Message must contain at least one non-whitespace character.',
+      recoverable: true,
+    }])
+    expect(events(second)).toEqual([])
+    expect(first.close).not.toHaveBeenCalled()
+  })
 })

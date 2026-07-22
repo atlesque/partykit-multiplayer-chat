@@ -3,7 +3,12 @@ import { RoomCore } from './room-core'
 
 function createRoom() {
   let nextId = 0
-  return new RoomCore(() => `participant-${++nextId}`)
+  let nextMessageId = 0
+  return new RoomCore(
+    () => `participant-${++nextId}`,
+    () => `message-${++nextMessageId}`,
+    () => 1_750_000_000_000 + nextMessageId,
+  )
 }
 
 describe('RoomCore', () => {
@@ -149,5 +154,67 @@ describe('RoomCore', () => {
       joinSequence: 1,
       isAdmin: true,
     })
+    expect(nextLifetime.snapshot.messages).toEqual([])
+  })
+
+  it('accepts a trimmed Message with authoritative attribution', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+
+    const message = room.acceptMessage(first.participant.id, '  Hello Room  ')
+
+    expect(message).toEqual({
+      id: 'message-1',
+      participantId: first.participant.id,
+      displayName: 'Alex#1',
+      text: 'Hello Room',
+      timestamp: 1_750_000_000_001,
+    })
+    expect(room.connect('Blair').snapshot.messages).toEqual([message])
+  })
+
+  it('rejects empty and over-limit Messages without adding history', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+
+    expect(() => room.acceptMessage(first.participant.id, '  \n ')).toThrow(
+      'Message must contain at least one non-whitespace character.',
+    )
+    expect(() => room.acceptMessage(first.participant.id, 'a'.repeat(501))).toThrow(
+      'Message must contain at most 500 characters.',
+    )
+    expect(room.connect('Blair').snapshot.messages).toEqual([])
+  })
+
+  it('counts Unicode code points instead of UTF-16 code units', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+
+    expect(room.acceptMessage(first.participant.id, '😀'.repeat(500)).text).toHaveLength(1000)
+    expect(() => room.acceptMessage(first.participant.id, '😀'.repeat(501))).toThrow(
+      'Message must contain at most 500 characters.',
+    )
+  })
+
+  it('retains only the latest 100 Messages', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+
+    for (let index = 1; index <= 101; index++) {
+      room.acceptMessage(first.participant.id, `Message ${index}`)
+    }
+
+    const history = room.connect('Blair').snapshot.messages
+    expect(history).toHaveLength(100)
+    expect(history[0]?.text).toBe('Message 2')
+    expect(history[99]?.text).toBe('Message 101')
+  })
+
+  it('rejects Messages from absent Participants', () => {
+    const room = createRoom()
+
+    expect(() => room.acceptMessage('missing', 'Hello')).toThrow(
+      'Participant is not connected to this Room.',
+    )
   })
 })
