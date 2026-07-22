@@ -2,6 +2,7 @@
 node_modules/
 .nuxt/
 .partykit/
+.pnpm-store/
 .output/
 dist
 test-results/
