@@ -50,6 +50,30 @@ describe('RoomCore', () => {
     expect(second.snapshot.adminId).toBe('participant-1')
   })
 
+  it('returns authoritative presence and a transient notice for a later join', () => {
+    const room = createRoom()
+
+    const first = room.connect('Alex')
+    const second = room.connect('Alex')
+
+    expect(first.notices).toEqual([])
+    expect(second.participant).toMatchObject({
+      displayName: 'Alex#2',
+      joinSequence: 2,
+      isAdmin: false,
+    })
+    expect(second.presence.adminId).toBe('participant-1')
+    expect(second.presence.participants.map(participant => participant.displayName)).toEqual([
+      'Alex#1',
+      'Alex#2',
+    ])
+    expect(second.notices).toEqual([{
+      type: 'notice',
+      kind: 'join',
+      text: 'Alex#2 joined the Room.',
+    }])
+  })
+
   it('creates a distinct later participation after disconnect and reconnect', () => {
     const room = createRoom()
     const first = room.connect('Alex')
@@ -69,6 +93,47 @@ describe('RoomCore', () => {
       'participant-2',
       'participant-3',
     ])
+  })
+
+  it('returns leave presence without an Admin change for a non-Admin departure', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+    const second = room.connect('Blair')
+
+    const transition = room.disconnect(second.participant.id)
+
+    expect(transition?.presence).toEqual({
+      adminId: first.participant.id,
+      participants: [first.participant],
+    })
+    expect(transition?.notices).toEqual([{
+      type: 'notice',
+      kind: 'leave',
+      text: 'Blair#1 left the Room.',
+    }])
+  })
+
+  it('promotes the earliest remaining Participant when Admin leaves', () => {
+    const room = createRoom()
+    const first = room.connect('Alex')
+    const second = room.connect('Blair')
+    room.connect('Casey')
+
+    const transition = room.disconnect(first.participant.id)
+
+    expect(transition?.presence.adminId).toBe(second.participant.id)
+    expect(transition?.presence.participants.map(participant => ({
+      displayName: participant.displayName,
+      isAdmin: participant.isAdmin,
+    }))).toEqual([
+      { displayName: 'Blair#1', isAdmin: true },
+      { displayName: 'Casey#1', isAdmin: false },
+    ])
+    expect(transition?.notices).toEqual([
+      { type: 'notice', kind: 'leave', text: 'Alex#1 left the Room.' },
+      { type: 'notice', kind: 'admin-change', text: 'Blair#1 is now Admin.' },
+    ])
+    expect(room.disconnect(first.participant.id)).toBeUndefined()
   })
 
   it('starts a fresh Room lifetime after the final Participant disconnects', () => {

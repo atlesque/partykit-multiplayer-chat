@@ -22,6 +22,7 @@ const selfParticipant = computed(() => snapshot.value?.participants.find(
   participant => participant.id === snapshot.value?.selfId,
 ))
 const connectionError = computed(() => roomConnection.value?.error.value ?? '')
+const activity = computed(() => roomConnection.value?.activity.value ?? [])
 
 function enterRoom() {
   const result = rememberChosenName(chosenName.value)
@@ -125,6 +126,23 @@ onBeforeUnmount(() => roomConnection.value?.stop())
               <li v-for="participant in snapshot.participants" :key="participant.id">
                 <span>{{ participant.displayName }}</span>
                 <span v-if="participant.isAdmin" class="admin-badge">Admin</span>
+              </li>
+            </ol>
+          </section>
+
+          <section
+            v-if="activity.length"
+            class="activity-panel"
+            aria-labelledby="activity-heading"
+          >
+            <h2 id="activity-heading">Activity</h2>
+            <ol class="activity-list" aria-label="Recent Room activity" aria-live="polite">
+              <li
+                v-for="(notice, index) in activity"
+                :key="`${index}-${notice.kind}-${notice.text}`"
+                :data-kind="notice.kind"
+              >
+                {{ notice.text }}
               </li>
             </ol>
           </section>

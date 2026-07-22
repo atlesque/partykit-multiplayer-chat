@@ -74,22 +74,56 @@ function isMessage(value: unknown): value is RoomSnapshot['messages'][number] {
     && Number.isFinite(message.timestamp)
 }
 
-function parseSnapshot(data: string): RoomSnapshot | null {
+type ParsedServerEvent =
+  | ({ type: 'snapshot' } & RoomSnapshot)
+  | Extract<ServerEvent, { type: 'presence' | 'notice' }>
+
+function hasValidPresence(
+  adminId: unknown,
+  participants: unknown,
+): participants is RoomSnapshot['participants'] {
+  if (!Array.isArray(participants) || !participants.every(isParticipant)) {
+    return false
+  }
+  const ids = new Set(participants.map(participant => participant.id))
+  if (ids.size !== participants.length || typeof adminId !== 'string' || !ids.has(adminId)) {
+    return false
+  }
+  if (!participants.every((participant, index) => (
+    participant.isAdmin === (participant.id === adminId)
+    && (index === 0 || participant.joinSequence > participants[index - 1]!.joinSequence)
+  ))) {
+    return false
+  }
+  return true
+}
+
+function parseServerEvent(data: string): ParsedServerEvent | null {
   try {
     const event = JSON.parse(data) as ServerEvent
-    if (
-      event.type !== 'snapshot'
-      || typeof event.selfId !== 'string'
-      || typeof event.adminId !== 'string'
-      || !Array.isArray(event.participants)
-      || !Array.isArray(event.messages)
-      || !event.participants.every(isParticipant)
-      || !event.messages.every(isMessage)
-    ) {
-      return null
+    if (event.type === 'snapshot') {
+      if (
+        typeof event.selfId !== 'string'
+        || !hasValidPresence(event.adminId, event.participants)
+        || !event.participants.some(participant => participant.id === event.selfId)
+        || !Array.isArray(event.messages)
+        || !event.messages.every(isMessage)
+      ) {
+        return null
+      }
+      return event
     }
-    const { selfId, adminId, participants, messages } = event
-    return { selfId, adminId, participants, messages }
+    if (event.type === 'presence') {
+      return hasValidPresence(event.adminId, event.participants) ? event : null
+    }
+    if (event.type === 'notice') {
+      return (
+        ['join', 'leave', 'admin-change'].includes(event.kind)
+        && typeof event.text === 'string'
+        && event.text.length > 0
+      ) ? event : null
+    }
+    return null
   }
   catch {
     return null
@@ -99,6 +133,7 @@ function parseSnapshot(data: string): RoomSnapshot | null {
 export function useRoomConnection(options: RoomConnectionOptions) {
   const status = ref<RoomConnectionStatus>('disconnected')
   const snapshot = ref<RoomSnapshot | null>(null)
+  const activity = ref<Array<Extract<ServerEvent, { type: 'notice' }>>>([])
   const error = ref('')
   const createSocket = options.createSocket ?? (url => new WebSocket(url))
   const schedule = options.schedule ?? defaultSchedule
@@ -127,6 +162,7 @@ export function useRoomConnection(options: RoomConnectionOptions) {
 
     if (automaticRetryAvailable) {
       automaticRetryAvailable = false
+      activity.value = []
       status.value = 'reconnecting'
       const scheduledGeneration = generation
       retryHandle = schedule(() => {
@@ -144,6 +180,7 @@ export function useRoomConnection(options: RoomConnectionOptions) {
 
   function openSocket(nextStatus: 'joining' | 'reconnecting'): void {
     clearRetry()
+    activity.value = []
     status.value = nextStatus
     error.value = ''
     const attemptGeneration = ++generation
@@ -165,13 +202,30 @@ export function useRoomConnection(options: RoomConnectionOptions) {
       if (stopped || attemptGeneration !== generation) {
         return
       }
-      const nextSnapshot = parseSnapshot(event.data)
-      if (!nextSnapshot) {
+      const serverEvent = parseServerEvent(event.data)
+      if (!serverEvent) {
         return
       }
-      snapshot.value = nextSnapshot
-      status.value = 'connected'
-      automaticRetryAvailable = true
+      if (serverEvent.type === 'snapshot') {
+        const { type: _type, ...nextSnapshot } = serverEvent
+        snapshot.value = nextSnapshot
+        status.value = 'connected'
+        automaticRetryAvailable = true
+      }
+      else if (
+        serverEvent.type === 'presence'
+        && snapshot.value
+        && serverEvent.participants.some(participant => participant.id === snapshot.value?.selfId)
+      ) {
+        snapshot.value = {
+          ...snapshot.value,
+          adminId: serverEvent.adminId,
+          participants: serverEvent.participants,
+        }
+      }
+      else if (serverEvent.type === 'notice') {
+        activity.value = [...activity.value, { ...serverEvent }].slice(-20)
+      }
     }
     nextSocket.onerror = () => failAttempt(attemptGeneration)
     nextSocket.onclose = event => failAttempt(attemptGeneration, event.reason)
@@ -209,6 +263,7 @@ export function useRoomConnection(options: RoomConnectionOptions) {
   return {
     status: readonly(status),
     snapshot: readonly(snapshot),
+    activity: readonly(activity),
     error: readonly(error),
     start,
     retry,

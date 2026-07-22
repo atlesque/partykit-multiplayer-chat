@@ -320,6 +320,50 @@ button:disabled:hover {
   font-size: 0.86rem;
 }
 
+.activity-panel {
+  border-bottom: 1px solid rgb(23 33 29 / 12%);
+  padding-bottom: 1.25rem;
+}
+
+.activity-panel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 0.86rem;
+}
+
+.activity-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  color: #53605a;
+  font-size: 0.84rem;
+  list-style: none;
+}
+
+.activity-list li {
+  position: relative;
+  padding-left: 1rem;
+}
+
+.activity-list li::before {
+  position: absolute;
+  top: 0.48em;
+  left: 0;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #3b916d;
+  content: "";
+}
+
+.activity-list li[data-kind="leave"]::before {
+  background: #b4512f;
+}
+
+.activity-list li[data-kind="admin-change"]::before {
+  background: #d19a32;
+}
+
 .participant-list {
   display: grid;
   gap: 0.65rem;

@@ -151,6 +151,99 @@ describe('useRoomConnection', () => {
     expect(connection.snapshot.value).toBeNull()
   })
 
+  it('replaces authoritative presence while preserving self identity and Messages', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+
+    sockets[0]!.message({
+      type: 'presence',
+      adminId: 'participant-2',
+      participants: [
+        {
+          id: 'participant-1',
+          chosenName: 'Alex',
+          displayName: 'Alex#1',
+          joinSequence: 1,
+          isAdmin: false,
+        },
+        {
+          id: 'participant-2',
+          chosenName: 'Blair',
+          displayName: 'Blair#1',
+          joinSequence: 2,
+          isAdmin: true,
+        },
+      ],
+    })
+
+    expect(connection.snapshot.value).toMatchObject({
+      selfId: 'participant-1',
+      adminId: 'participant-2',
+      messages: [],
+    })
+    expect(connection.snapshot.value?.participants.map(participant => participant.id)).toEqual([
+      'participant-1',
+      'participant-2',
+    ])
+  })
+
+  it('ignores structurally inconsistent presence events', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+    const initialSnapshot = connection.snapshot.value
+
+    sockets[0]!.rawMessage({
+      type: 'presence',
+      adminId: 'missing-participant',
+      participants: initialSnapshot?.participants,
+    })
+
+    expect(connection.snapshot.value).toBe(initialSnapshot)
+  })
+
+  it('keeps the latest 20 transient notices in chronological order', () => {
+    const { connection, sockets } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+
+    for (let index = 1; index <= 21; index++) {
+      sockets[0]!.message({
+        type: 'notice',
+        kind: 'join',
+        text: `Participant ${index} joined the Room.`,
+      })
+    }
+
+    expect(connection.activity.value).toHaveLength(20)
+    expect(connection.activity.value[0]?.text).toBe('Participant 2 joined the Room.')
+    expect(connection.activity.value[19]?.text).toBe('Participant 21 joined the Room.')
+  })
+
+  it('ignores malformed notices and clears activity for each new participation', () => {
+    const { connection, sockets, scheduled } = setup()
+    connection.start()
+    sockets[0]!.message(snapshot())
+    sockets[0]!.message({
+      type: 'notice',
+      kind: 'leave',
+      text: 'Blair#1 left the Room.',
+    })
+    sockets[0]!.rawMessage({ type: 'notice', kind: 'unknown', text: 'Ignored' })
+    expect(connection.activity.value.map(notice => notice.text)).toEqual([
+      'Blair#1 left the Room.',
+    ])
+
+    sockets[0]!.disconnect()
+    expect(connection.activity.value).toEqual([])
+    scheduled[0]!()
+    sockets[1]!.message(snapshot('participant-2'))
+    sockets[1]!.message({ type: 'notice', kind: 'join', text: 'Casey#1 joined the Room.' })
+    connection.retry()
+    expect(connection.activity.value).toEqual([])
+  })
+
   it('routes synchronous socket-construction failures through retry and terminal recovery', () => {
     const scheduled: Array<() => void> = []
     const connection = useRoomConnection({
